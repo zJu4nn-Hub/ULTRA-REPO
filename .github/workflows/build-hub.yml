@@ -1,0 +1,54 @@
+# Build used by the zJu4nn Hub "Mashups" tab.
+# The BepInEx plugin compiles against the game's own assemblies (not redistributable), so this workflow takes the
+# upstream release dll, pinned by sha256 (zip AND dll — reviewed by the zJu4nn Hub), and repackages it for the Hub.
+# Upstream: https://github.com/roryekay/ULTRA-REPO (MIT) — all credit to the original author.
+name: build-hub
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. hub-v0.1.0-dev-1)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      UP_URL: https://github.com/roryekay/ULTRA-REPO/releases/download/v0.1.0-dev/ULTRA-REPO-0.1.0-dev.zip
+      UP_SHA256: 15916e5d4b5a70ec8175b4a39cb7f76a92bf099faf7fdfed46c2fbe0ef67bbb6
+      DLL_SHA256: 96894ce639e4969a0e1215e6ea8bc7ab65779f0a1443ddcc0094a9e4d0864b50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Upstream plugin (pinned)
+        run: |
+          curl -fsSL -o up.zip "$UP_URL"
+          echo "$UP_SHA256  up.zip" | sha256sum -c -
+          mkdir up && (cd up && unzip -q ../up.zip || true)
+          dll=$(find up -iname 'UltraHaul.dll' -o -iname '*UltraHaul.dll' | head -1)
+          test -n "$dll" || { echo "dll not found"; find up; exit 1; }
+          echo "$DLL_SHA256  $dll" | sha256sum -c -
+          echo "DLL=$dll" >> "$GITHUB_ENV"
+
+      - name: Package
+        run: |
+          p=pkg/BepInEx/plugins/UltraHaul
+          mkdir -p "$p"
+          cp "$DLL" "$p/UltraHaul.dll"
+          cp LICENSE "$p/LICENSE.txt"
+          printf '%s\n' "ULTRA R.E.P.O. 0.1.0-dev (build do zJu4nn Hub)" "" "R.E.P.O. com o V1, as armas e as moedas do ULTRAKILL (lidos da SUA copia do ULTRAKILL)." "Original de roryk (github.com/roryekay/ULTRA-REPO). Licenca MIT." "Projeto de fas, sem ligacao com semiwork, Arsi Hakita Patala ou New Blood Interactive." > pkg/LEIA.txt
+          (cd pkg && find . -type f ! -name SHA256SUMS.txt -printf '%P\n' | sort | xargs sha256sum > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          zip="$(echo 'UltraHaul' | tr 'A-Z' 'a-z')-hub-0.1.0-dev.zip"
+          (cd pkg && zip -qrX "../$zip" .)
+          sha256sum "$zip"
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ inputs.tag }}" "$ZIP" --repo "${{ github.repository }}" --title "ULTRA R.E.P.O. 0.1.0-dev (zJu4nn Hub)" --notes "Repackage of roryekay/ULTRA-REPO 0.1.0-dev for the zJu4nn Hub Mashups tab: upstream dll pinned by sha256 $DLL_SHA256. Workflow at ${{ github.sha }}. MIT."
